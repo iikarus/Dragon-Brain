@@ -41,7 +41,7 @@ class RepositoryQueryMixin:
               AND COALESCE(n.occurred_at, n.created_at) <= $end
               AND n.project_id = $project_id
             RETURN n
-            ORDER BY COALESCE(n.occurred_at, n.created_at) ASC
+            ORDER BY COALESCE(n.occurred_at, n.created_at) DESC
             LIMIT $limit
             """
             params = {
@@ -56,7 +56,7 @@ class RepositoryQueryMixin:
             WHERE COALESCE(n.occurred_at, n.created_at) >= $start
               AND COALESCE(n.occurred_at, n.created_at) <= $end
             RETURN n
-            ORDER BY COALESCE(n.occurred_at, n.created_at) ASC
+            ORDER BY COALESCE(n.occurred_at, n.created_at) DESC
             LIMIT $limit
             """
             params = {"start": start, "end": end, "limit": limit}

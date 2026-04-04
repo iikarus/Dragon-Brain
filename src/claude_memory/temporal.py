@@ -35,8 +35,13 @@ class TemporalMixin:
         session_id = str(uuid.uuid4())
         timestamp = datetime.now(UTC).isoformat()
 
+        # Generate a session name from focus text for discoverability
+        focus_name = params.focus[:80].rstrip(".… ") if params.focus else ""
+        session_name = f"Session — {focus_name}" if focus_name else f"Session — {timestamp[:16]}"
+
         props = {
             "id": session_id,
+            "name": session_name,
             "project_id": params.project_id,
             "focus": params.focus,
             "status": "active",

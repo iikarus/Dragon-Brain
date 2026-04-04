@@ -245,16 +245,17 @@ class SearchMixin(SearchAdvancedMixin):
                 if node_id in nodes_map:
                     node_props = nodes_map[node_id]
 
-                    # E-2: Deep hydration
-                    observations: list[str] = []
+                    # Observations are always hydrated — they are the entity's
+                    # own content and should never return as [].
+                    # Relationships are only included when deep=True.
+                    obs_query = (
+                        "MATCH (e {id: $eid})-[:HAS_OBSERVATION]->(o) "
+                        "RETURN o.content ORDER BY o.created_at ASC"
+                    )
+                    obs_res = self.repo.execute_cypher(obs_query, {"eid": node_id})
+                    observations: list[str] = [row[0] for row in obs_res.result_set if row[0]]
                     relationships: list[dict[str, str]] = []
                     if deep:
-                        obs_query = (
-                            "MATCH (e:Entity {id: $eid})-[:HAS_OBSERVATION]->(o) "
-                            "RETURN o.content ORDER BY o.created_at ASC"
-                        )
-                        obs_res = self.repo.execute_cypher(obs_query, {"eid": node_id})
-                        observations = [row[0] for row in obs_res.result_set if row[0]]
                         relationships = [
                             e
                             for e in graph_data["edges"]

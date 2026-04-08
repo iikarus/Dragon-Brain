@@ -7,6 +7,7 @@ inject service references before any tool is invoked.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from claude_memory.schema import (
@@ -14,6 +15,7 @@ from claude_memory.schema import (
     GapDetectionParams,
     TemporalQueryParams,
 )
+from claude_memory.timeout import MCP_OP_TIMEOUT, MCP_OP_TIMEOUT_SEARCH, timed_call
 
 if TYPE_CHECKING:  # pragma: no cover
     from mcp.server.fastmcp import FastMCP
@@ -67,7 +69,8 @@ async def search_associative(  # noqa: PLR0913
     richer, context-aware retrieval.  Score weights default to env vars
     ``W_SIMILARITY``, ``W_ACTIVATION``, ``W_SALIENCE``, ``W_RECENCY``.
     """
-    results = await _service.search_associative(  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    results = await timed_call("search_associative", _service.search_associative(  # type: ignore[union-attr]
         query,
         limit=limit,
         project_id=project_id,
@@ -77,7 +80,7 @@ async def search_associative(  # noqa: PLR0913
         w_act=w_act,
         w_sal=w_sal,
         w_rec=w_rec,
-    )
+    ), MCP_OP_TIMEOUT_SEARCH, dispatch_t0=_t0)
     if not results:
         return [{"message": "No results found."}]
     return [res.model_dump() for res in results]
@@ -85,7 +88,8 @@ async def search_associative(  # noqa: PLR0913
 
 async def run_librarian_cycle() -> dict[str, Any]:
     """Triggers the Librarian Agent to cluster and consolidate memories."""
-    return await _librarian.run_cycle()  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("run_librarian_cycle", _librarian.run_cycle(), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def create_memory_type(
@@ -118,7 +122,8 @@ async def query_timeline(
         limit=limit,
         project_id=project_id,
     )
-    return await _service.query_timeline(params)  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("query_timeline", _service.query_timeline(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def get_temporal_neighbors(
@@ -127,7 +132,8 @@ async def get_temporal_neighbors(
     limit: int = 10,
 ) -> list[dict[str, Any]]:
     """Find entities connected by temporal edges (before/after/both)."""
-    return await _service.get_temporal_neighbors(entity_id, direction, limit)  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("get_temporal_neighbors", _service.get_temporal_neighbors(entity_id, direction, limit), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def get_bottles(  # noqa: PLR0913
@@ -149,12 +155,14 @@ async def get_bottles(  # noqa: PLR0913
         project_id=project_id,
         include_content=include_content,
     )
-    return await _service.get_bottles(params)  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("get_bottles", _service.get_bottles(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def graph_health() -> dict[str, Any]:
     """Get graph health metrics: nodes, edges, density, orphans, communities, avg degree."""
-    return await _service.get_graph_health()  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("graph_health", _service.get_graph_health(), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def find_knowledge_gaps(
@@ -168,7 +176,8 @@ async def find_knowledge_gaps(
         max_edges=max_edges,
         limit=limit,
     )
-    return await _service.detect_structural_gaps(params)  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("find_knowledge_gaps", _service.detect_structural_gaps(params), MCP_OP_TIMEOUT_SEARCH, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def reconnect(
@@ -179,12 +188,14 @@ async def reconnect(
 
     Returns recent entities (last 24h), graph health summary, and time window.
     """
-    return await _service.reconnect(project_id=project_id, limit=limit)  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("reconnect", _service.reconnect(project_id=project_id, limit=limit), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def system_diagnostics() -> dict[str, Any]:
     """Unified system diagnostics — graph stats, vector stats, and split-brain check."""
-    return await _service.system_diagnostics()  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("system_diagnostics", _service.system_diagnostics(), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def list_orphans(limit: int = 50) -> list[dict[str, Any]]:
@@ -197,7 +208,8 @@ async def list_orphans(limit: int = 50) -> list[dict[str, Any]]:
     Args:
         limit: Maximum nodes to return (default 50, safety cap).
     """
-    return await _service.list_orphans(limit=limit)  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("list_orphans", _service.list_orphans(limit=limit), MCP_OP_TIMEOUT, dispatch_t0=_t0)  # type: ignore[union-attr]
 
 
 async def semantic_radar(
@@ -218,12 +230,13 @@ async def semantic_radar(
         similarity_threshold: Minimum cosine similarity (default 0.6).
         project_id: Optional project scope filter.
     """
-    return await _service.semantic_radar(  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("semantic_radar", _service.semantic_radar(  # type: ignore[union-attr]
         entity_id=entity_id,
         limit=limit,
         similarity_threshold=similarity_threshold,
         project_id=project_id,
-    )
+    ), MCP_OP_TIMEOUT_SEARCH, dispatch_t0=_t0)
 
 
 async def find_semantic_opportunities(
@@ -243,9 +256,10 @@ async def find_semantic_opportunities(
         limit: Maximum opportunities to return (default 20).
         min_graph_distance: Minimum graph hops to qualify (default 3).
     """
-    return await _service.find_semantic_opportunities(  # type: ignore[union-attr]
+    _t0 = time.monotonic()
+    return await timed_call("find_semantic_opportunities", _service.find_semantic_opportunities(  # type: ignore[union-attr]
         project_id=project_id,
         similarity_threshold=similarity_threshold,
         limit=limit,
         min_graph_distance=min_graph_distance,
-    )
+    ), MCP_OP_TIMEOUT_SEARCH, dispatch_t0=_t0)

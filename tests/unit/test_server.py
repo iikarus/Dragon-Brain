@@ -353,16 +353,16 @@ async def test_sad11_create_memory_type_defaults() -> None:
 
 
 def test_happy_main_stdio_transport() -> None:
-    with patch.object(server, "mcp") as mock_mcp:
+    with patch("anyio.run") as mock_anyio_run:
         with patch.dict(os.environ, {"MCP_TRANSPORT": TRANSPORT_STDIO}):
             server.main()
-            mock_mcp.run.assert_called_once()
+            mock_anyio_run.assert_called_once_with(server._run_stdio_buffered)
 
 
 def test_happy_main_sse_transport() -> None:
     """SSE transport was removed in Phase 7. main() now always uses stdio.
-    We verify that main() calls mcp.run() regardless of MCP_TRANSPORT env."""
-    with patch.object(server, "mcp") as mock_mcp:
+    We verify that main() calls anyio.run() regardless of MCP_TRANSPORT env."""
+    with patch("anyio.run") as mock_anyio_run:
         with patch.dict(os.environ, {"MCP_TRANSPORT": TRANSPORT_SSE}):
             server.main()
-            mock_mcp.run.assert_called_once()
+            mock_anyio_run.assert_called_once_with(server._run_stdio_buffered)

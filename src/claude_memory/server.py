@@ -1,6 +1,7 @@
 """MCP server exposing Claude Memory tools via stdio transport."""
 
 import logging
+import time
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -22,6 +23,7 @@ from claude_memory.schema import (
     SessionEndParams,
     SessionStartParams,
 )
+from claude_memory.timeout import MCP_OP_TIMEOUT, MCP_OP_TIMEOUT_SEARCH, timed_call
 from claude_memory.tools import MemoryService
 from claude_memory.tools_extra import (
     configure as _configure_extra_tools,
@@ -73,7 +75,8 @@ async def create_entity(  # noqa: PLR0913
         certainty=certainty,
         evidence=evidence,
     )
-    return await service.create_entity(params)
+    _t0 = time.monotonic()
+    return await timed_call("create_entity", service.create_entity(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -88,7 +91,8 @@ async def update_entity(
         properties=properties,
         reason=reason,
     )
-    return await service.update_entity(params)
+    _t0 = time.monotonic()
+    return await timed_call("update_entity", service.update_entity(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -103,7 +107,8 @@ async def delete_entity(
         reason=reason,
         soft_delete=soft_delete,
     )
-    return await service.delete_entity(params)
+    _t0 = time.monotonic()
+    return await timed_call("delete_entity", service.delete_entity(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -126,7 +131,8 @@ async def create_relationship(  # noqa: PLR0913
         confidence=confidence,
         weight=weight,
     )
-    return await service.create_relationship(params)
+    _t0 = time.monotonic()
+    return await timed_call("create_relationship", service.create_relationship(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -139,7 +145,8 @@ async def delete_relationship(
         relationship_id=relationship_id,
         reason=reason,
     )
-    return await service.delete_relationship(params)
+    _t0 = time.monotonic()
+    return await timed_call("delete_relationship", service.delete_relationship(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -158,14 +165,16 @@ async def add_observation(
         certainty=certainty,
         evidence=evidence,
     )
-    return await service.add_observation(params)
+    _t0 = time.monotonic()
+    return await timed_call("add_observation", service.add_observation(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
 async def start_session(project_id: str, focus: str) -> dict[str, Any]:
     """Starts a new session context."""
     params = SessionStartParams(project_id=project_id, focus=focus)
-    return await service.start_session(params)
+    _t0 = time.monotonic()
+    return await timed_call("start_session", service.start_session(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -176,7 +185,8 @@ async def end_session(
     if outcomes is None:
         outcomes = []
     params = SessionEndParams(session_id=session_id, summary=summary, outcomes=outcomes)
-    return await service.end_session(params)
+    _t0 = time.monotonic()
+    return await timed_call("end_session", service.end_session(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -197,7 +207,8 @@ async def record_breakthrough(
         analogy_used=analogy_used,
         concepts_unlocked=concepts_unlocked,
     )
-    return await service.record_breakthrough(params)
+    _t0 = time.monotonic()
+    return await timed_call("record_breakthrough", service.record_breakthrough(params), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -205,43 +216,50 @@ async def get_neighbors(
     entity_id: str, depth: int = 1, limit: int = 20, offset: int = 0
 ) -> list[dict[str, Any]]:
     """Retrieve neighboring entities up to a certain depth."""
-    return await service.get_neighbors(entity_id, depth, limit, offset)
+    _t0 = time.monotonic()
+    return await timed_call("get_neighbors", service.get_neighbors(entity_id, depth, limit, offset), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
 async def traverse_path(from_id: str, to_id: str) -> list[dict[str, Any]]:
     """Find the shortest path between two entities."""
-    return await service.traverse_path(from_id, to_id)
+    _t0 = time.monotonic()
+    return await timed_call("traverse_path", service.traverse_path(from_id, to_id), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
 async def find_cross_domain_patterns(entity_id: str, limit: int = 10) -> list[dict[str, Any]]:
     """Analyzes the graph for non-obvious connections between disparate domains."""
-    return await service.find_cross_domain_patterns(entity_id, limit)
+    _t0 = time.monotonic()
+    return await timed_call("find_cross_domain_patterns", service.find_cross_domain_patterns(entity_id, limit), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
 async def get_evolution(entity_id: str) -> list[dict[str, Any]]:
     """Retrieve the evolution (history/observations) of an entity."""
-    return await service.get_evolution(entity_id)
+    _t0 = time.monotonic()
+    return await timed_call("get_evolution", service.get_evolution(entity_id), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
 async def point_in_time_query(query_text: str, as_of: str) -> list[dict[str, Any]]:
     """Execute a search considering only knowledge known before `as_of`."""
-    return await service.point_in_time_query(query_text, as_of)
+    _t0 = time.monotonic()
+    return await timed_call("point_in_time_query", service.point_in_time_query(query_text, as_of), MCP_OP_TIMEOUT_SEARCH, dispatch_t0=_t0)
 
 
 @mcp.tool()
 async def archive_entity(entity_id: str) -> dict[str, Any]:
     """Archive an entity (logical hide."""
-    return await service.archive_entity(entity_id)
+    _t0 = time.monotonic()
+    return await timed_call("archive_entity", service.archive_entity(entity_id), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
 async def prune_stale(days: int = 30) -> dict[str, Any]:
     """Hard delete archived entities older than N days."""
-    return await service.prune_stale(days)
+    _t0 = time.monotonic()
+    return await timed_call("prune_stale", service.prune_stale(days), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -261,7 +279,8 @@ async def search_memory(  # noqa: PLR0913
     temporal_window_days: lookback window for temporal queries (default 7).
     include_meta: when True, wraps results with temporal exhaustion metadata.
     """
-    results = await service.search(
+    _t0 = time.monotonic()
+    results = await timed_call("search_memory", service.search(
         query,
         limit,
         project_id,
@@ -269,7 +288,7 @@ async def search_memory(  # noqa: PLR0913
         mmr=mmr,
         strategy=strategy,
         temporal_window_days=temporal_window_days,
-    )
+    ), MCP_OP_TIMEOUT_SEARCH, dispatch_t0=_t0)
     if not results:
         return "No results found."
 
@@ -304,7 +323,8 @@ async def analyze_graph(
     algorithm: Literal["pagerank", "louvain"] = "pagerank",
 ) -> list[dict[str, Any]]:
     """Runs graph algorithms (pagerank or louvain) to find key entities or communities."""
-    return await service.analyze_graph(algorithm=algorithm)
+    _t0 = time.monotonic()
+    return await timed_call("analyze_graph", service.analyze_graph(algorithm=algorithm), MCP_OP_TIMEOUT, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -314,7 +334,8 @@ async def get_hologram(
     max_tokens: int = 8000,
 ) -> dict[str, Any]:
     """Retrieves a 'Hologram' — a connected subgraph relevant to the query."""
-    return await service.get_hologram(query, depth=depth, max_tokens=max_tokens)
+    _t0 = time.monotonic()
+    return await timed_call("get_hologram", service.get_hologram(query, depth=depth, max_tokens=max_tokens), MCP_OP_TIMEOUT_SEARCH, dispatch_t0=_t0)
 
 
 @mcp.tool()
@@ -332,28 +353,62 @@ async def search_stats() -> dict[str, Any]:
 
 _background_tasks: set[object] = set()  # prevent GC of fire-and-forget tasks
 
+# Buffer depth for outgoing MCP responses.  The MCP SDK uses zero-buffer
+# streams (anyio.create_memory_object_stream(0)) which means every response
+# write blocks until the stdout pipe drains.  Under burst load this causes
+# back-pressure that starves the event loop, preventing new request handlers
+# from running.  This buffer decouples handler completion from pipe I/O.
+_STDIO_WRITE_BUFFER = 16
+
+
+async def _run_stdio_buffered() -> None:
+    """Launch MCP server with a buffered write stream.
+
+    Prevents stdout back-pressure from stalling the event loop when
+    multiple tool responses complete simultaneously.  See GOTCHAS #9.
+    """
+    import asyncio  # noqa: PLC0415
+
+    import anyio  # noqa: PLC0415
+    from mcp.server.stdio import stdio_server  # noqa: PLC0415
+
+    from claude_memory.update_check import check_for_updates  # noqa: PLC0415
+
+    # Fire-and-forget update check inside the running event loop
+    task = asyncio.get_event_loop().create_task(check_for_updates())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    async with stdio_server() as (read_stream, write_stream):
+        buffered_send, buffered_recv = anyio.create_memory_object_stream(
+            _STDIO_WRITE_BUFFER
+        )
+
+        async def _drain_to_stdout() -> None:
+            async with buffered_recv:
+                async for msg in buffered_recv:
+                    await write_stream.send(msg)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_drain_to_stdout)
+            await mcp._mcp_server.run(
+                read_stream,
+                buffered_send,
+                mcp._mcp_server.create_initialization_options(),
+            )
+
 
 def main() -> None:
     """Launch the MCP server via stdio transport."""
-    import asyncio  # noqa: PLC0415
+    import anyio  # noqa: PLC0415
 
     from claude_memory.logging_config import configure_logging  # noqa: PLC0415
-    from claude_memory.update_check import check_for_updates  # noqa: PLC0415
 
     configure_logging()
     logger = logging.getLogger(__name__)
 
-    # Fire-and-forget update check — never blocks startup
-    try:
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(check_for_updates())
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-    except RuntimeError:
-        pass  # No event loop yet — server will create one
-
     logger.info("Starting MCP server (stdio)")
-    mcp.run()
+    anyio.run(_run_stdio_buffered)
 
 
 if __name__ == "__main__":

@@ -77,19 +77,21 @@ def _render_explorer_tab() -> None:
             r = row[1]
             m = row[2]
 
+            n_id = n.properties.get("id", n.properties.get("name", "unknown"))
             net.add_node(
-                n.properties["id"],
+                n_id,
                 label=n.properties.get("name", "Unknown"),
                 title=str(n.properties),
             )
 
             if r is not None and m is not None:
+                m_id = m.properties.get("id", m.properties.get("name", "unknown"))
                 net.add_node(
-                    m.properties["id"],
+                    m_id,
                     label=m.properties.get("name", "Unknown"),
                     title=str(m.properties),
                 )
-                net.add_edge(n.properties["id"], m.properties["id"], title=r.relation)
+                net.add_edge(n_id, m_id, title=r.relation)
 
         net.repulsion()
         net.save_graph("graph.html")

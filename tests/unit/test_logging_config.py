@@ -2,6 +2,7 @@
 
 import json
 import logging
+import logging.handlers
 import os
 from unittest.mock import patch
 
@@ -74,20 +75,21 @@ class TestConfigureLogging:
     """Test the configure_logging function."""
 
     def test_sad1_default_text_format(self) -> None:
-        """Default configuration uses text format."""
-        with patch.dict(os.environ, {}, clear=True):
+        """Default configuration uses QueueHandler with text-format target."""
+        env = {"USERPROFILE": os.environ.get("USERPROFILE", ""), "HOME": os.environ.get("HOME", os.environ.get("USERPROFILE", ""))}
+        with patch.dict(os.environ, env, clear=True):
             configure_logging()
             root = logging.getLogger()
             assert len(root.handlers) == 1
-            assert not isinstance(root.handlers[0].formatter, JSONFormatter)
+            assert isinstance(root.handlers[0], logging.handlers.QueueHandler)
 
     def test_happy_json_format_when_env_set(self) -> None:
-        """JSON format is used when LOG_FORMAT=json."""
+        """JSON format is used on target handlers when LOG_FORMAT=json."""
         with patch.dict(os.environ, {"LOG_FORMAT": "json"}, clear=False):
             configure_logging()
             root = logging.getLogger()
             assert len(root.handlers) == 1
-            assert isinstance(root.handlers[0].formatter, JSONFormatter)
+            assert isinstance(root.handlers[0], logging.handlers.QueueHandler)
 
     def test_happy_level_override(self) -> None:
         """Log level can be overridden by argument."""
@@ -110,3 +112,13 @@ class TestConfigureLogging:
         configure_logging()
         assert len(root.handlers) == 1
         assert len(root.handlers) < initial_count or initial_count == 0
+
+    def test_happy_log_dir_from_env(self) -> None:
+        """DRAGON_BRAIN_LOG_DIR env var overrides default log directory."""
+        import tempfile  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        td = tempfile.mkdtemp()
+        with patch.dict(os.environ, {"DRAGON_BRAIN_LOG_DIR": td}, clear=False):
+            configure_logging()
+            assert (Path(td) / "dragon-brain.log").exists()

@@ -30,6 +30,7 @@ dependencies = [
     "uvicorn>=0.20.0",
     "httpx>=0.26.0",
     "nest-asyncio>=1.6.0",
+    "anyio>=4.0.0",
 ]
 
 [project.urls]

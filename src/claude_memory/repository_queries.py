@@ -36,12 +36,13 @@ class RepositoryQueryMixin:
         graph = self.select_graph()  # type: ignore[attr-defined]
         if project_id:
             query = """
-            MATCH (n:Entity)
+            MATCH (n)
             WHERE COALESCE(n.occurred_at, n.created_at) >= $start
               AND COALESCE(n.occurred_at, n.created_at) <= $end
               AND n.project_id = $project_id
+              AND n.node_type IS NOT NULL
             RETURN n
-            ORDER BY COALESCE(n.occurred_at, n.created_at) ASC
+            ORDER BY COALESCE(n.occurred_at, n.created_at) DESC
             LIMIT $limit
             """
             params = {
@@ -52,11 +53,12 @@ class RepositoryQueryMixin:
             }
         else:
             query = """
-            MATCH (n:Entity)
+            MATCH (n)
             WHERE COALESCE(n.occurred_at, n.created_at) >= $start
               AND COALESCE(n.occurred_at, n.created_at) <= $end
+              AND n.node_type IS NOT NULL
             RETURN n
-            ORDER BY COALESCE(n.occurred_at, n.created_at) ASC
+            ORDER BY COALESCE(n.occurred_at, n.created_at) DESC
             LIMIT $limit
             """
             params = {"start": start, "end": end, "limit": limit}

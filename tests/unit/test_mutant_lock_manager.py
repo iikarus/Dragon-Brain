@@ -6,7 +6,7 @@ async context manager, release-on-exception.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -192,7 +192,7 @@ class TestProjectLockAsyncCtx:
             from claude_memory.lock_manager import LockManager
 
             lm = LockManager()
-            with patch("asyncio.sleep"):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
                 with pytest.raises(TimeoutError):
                     async with lm.lock("p1"):
                         pass

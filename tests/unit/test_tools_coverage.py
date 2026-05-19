@@ -122,16 +122,17 @@ def service() -> MemoryService:
     svc.activation_engine.activate = AsyncMock(return_value={})
     svc.activation_engine.spread = AsyncMock(return_value={})
 
-    # Lock context manager mock — supports both sync and async with
-    mock_lock = MagicMock()
-    mock_lock.__enter__ = MagicMock(return_value=mock_lock)
-    mock_lock.__exit__ = MagicMock(return_value=False)
+    # Lock context manager mock — async-native to avoid unawaited coroutine leaks
+    mock_lock = AsyncMock()
     mock_lock.__aenter__ = AsyncMock(return_value=mock_lock)
     mock_lock.__aexit__ = AsyncMock(return_value=False)
     svc.lock_manager.lock.return_value = mock_lock
 
     # Default async_repo returns for _compute_entity_embedding_text
     svc.repo.get_observations_for_entity.return_value = []
+
+    # Prevent fire-and-forget tasks from creating orphan coroutines during gc
+    svc._fire_salience_update = MagicMock()
 
     return svc
 

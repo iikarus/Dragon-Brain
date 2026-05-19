@@ -37,6 +37,8 @@ def mock_service():
     service.activation_engine = MagicMock()
     service.activation_engine.activate = AsyncMock(return_value={})
     service.activation_engine.spread = AsyncMock(return_value={})
+    # Prevent fire-and-forget tasks from creating orphan coroutines during gc
+    service._fire_salience_update = MagicMock()
     return service
 
 

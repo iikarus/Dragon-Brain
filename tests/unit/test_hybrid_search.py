@@ -56,7 +56,9 @@ def service():
     svc.search_associative = AsyncMock(return_value=[])
     # Activation engine defaults
     svc.activation_engine.activate = MagicMock(return_value={})
-    svc.activation_engine.spread = MagicMock(return_value={})
+    svc.activation_engine.spread = AsyncMock(return_value={})
+    # Prevent fire-and-forget tasks from creating orphan coroutines during gc
+    svc._fire_salience_update = MagicMock()
     return svc
 
 

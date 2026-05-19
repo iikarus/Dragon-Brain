@@ -164,6 +164,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v"
 filterwarnings = [
+    "error::RuntimeWarning",
     "ignore::coverage.exceptions.CoverageWarning",
     "ignore::requests.exceptions.RequestsDependencyWarning",
 ]

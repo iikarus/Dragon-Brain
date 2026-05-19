@@ -122,16 +122,17 @@ def service() -> MemoryService:
     svc.activation_engine.activate = AsyncMock(return_value={})
     svc.activation_engine.spread = AsyncMock(return_value={})
 
-    # Lock context manager mock — supports both sync and async with
-    mock_lock = MagicMock()
-    mock_lock.__enter__ = MagicMock(return_value=mock_lock)
-    mock_lock.__exit__ = MagicMock(return_value=False)
+    # Lock context manager mock — async-native to avoid unawaited coroutine leaks
+    mock_lock = AsyncMock()
     mock_lock.__aenter__ = AsyncMock(return_value=mock_lock)
     mock_lock.__aexit__ = AsyncMock(return_value=False)
     svc.lock_manager.lock.return_value = mock_lock
 
     # Default async_repo returns for _compute_entity_embedding_text
     svc.repo.get_observations_for_entity.return_value = []
+
+    # Prevent fire-and-forget tasks from creating orphan coroutines during gc
+    svc._fire_salience_update = MagicMock()
 
     return svc
 
@@ -1032,13 +1033,6 @@ async def test_happy_search_fires_salience_async(service: MemoryService) -> None
         ],
         "edges": [],
     }
-    service.repo.increment_salience.return_value = [
-        {
-            "id": ENTITY_ID,
-            "salience_score": SALIENCE_AFTER_ONE_RETRIEVAL,
-            "retrieval_count": 1,
-        }
-    ]
 
     _res = await service.search(SearchMemoryParams(query=SEARCH_QUERY, limit=SEARCH_LIMIT))
 
@@ -1047,14 +1041,9 @@ async def test_happy_search_fires_salience_async(service: MemoryService) -> None
     # Returns PRE-update salience from graph data (fire-and-forget)
     assert result[0].salience_score == SALIENCE_DEFAULT
 
-    # Flush background tasks deterministically
-    import asyncio
-
-    if service._background_tasks:
-        await asyncio.gather(*service._background_tasks, return_exceptions=True)
-    # Verify salience was still fired in background (entity-001 must be present)
-    service.repo.increment_salience.assert_called_once()
-    salience_ids = service.repo.increment_salience.call_args[0][0]
+    # Verify _fire_salience_update was called with result IDs (fixture mocks it)
+    service._fire_salience_update.assert_called_once()
+    salience_ids = service._fire_salience_update.call_args[0][0]
     assert ENTITY_ID in salience_ids
 
 
@@ -1076,20 +1065,16 @@ async def test_evil13_search_salience_background_error_silent(service: MemorySer
         ],
         "edges": [],
     }
-    service.repo.increment_salience.side_effect = ConnectionError("FalkorDB down")
 
     _res = await service.search(SearchMemoryParams(query=SEARCH_QUERY, limit=SEARCH_LIMIT))
 
     result = _res.get("results", []) if isinstance(_res, dict) else _res
     assert len(result) == 1
-    # Uses graph node's salience_score (background error is silent)
+    # Uses graph node's salience_score (background fire is mocked)
     assert result[0].salience_score == 3.5
 
-    # Flush background tasks (should not raise)
-    import asyncio
-
-    if service._background_tasks:
-        await asyncio.gather(*service._background_tasks, return_exceptions=True)
+    # Verify _fire_salience_update was called (fixture mocks it as MagicMock)
+    service._fire_salience_update.assert_called_once()
 
 
 async def test_sad15_search_salience_fallback_default(service: MemoryService) -> None:

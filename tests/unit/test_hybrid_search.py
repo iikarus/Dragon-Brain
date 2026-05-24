@@ -27,23 +27,6 @@ NOW_ISO = datetime.now(UTC).isoformat()
 # ─── Fixtures ───────────────────────────────────────────────────────
 
 
-@pytest.fixture(autouse=True)
-def _drain_orphan_coroutines() -> None:
-    """Force GC after each test to drain orphan coroutines within test boundaries.
-
-    Without this, unawaited coroutines created by AsyncMock's internal
-    _execute_mock_call are reaped at session end, producing warnings.
-    Per-file fixture (branch write guard blocks conftest.py changes).
-    """
-    import gc
-    import warnings
-
-    yield
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        gc.collect()
-
-
 @pytest.fixture()
 def service():
     """MemoryService with all deps mocked."""
@@ -74,6 +57,8 @@ def service():
     # Activation engine defaults
     svc.activation_engine.activate = AsyncMock(return_value={})
     svc.activation_engine.spread = AsyncMock(return_value={})
+    # Prevent _fire_salience_update from spawning orphan background tasks
+    svc._fire_salience_update = MagicMock()
     return svc
 
 
@@ -118,7 +103,7 @@ def test_meta_fixture_topology_required(service) -> None:
         "service.vector_store has async methods — must be AsyncMock"
     )
     assert isinstance(service.activation_engine.activate, AsyncMock), (
-        "ActivationEngine.activate is async — must be AsyncMock"
+        "ActivationEngine.activate is sync — must be AsyncMock"
     )
     assert isinstance(service.activation_engine.spread, AsyncMock), (
         "ActivationEngine.spread is async — must be AsyncMock"
@@ -194,8 +179,8 @@ class TestHybridSearchPipeline:
         service.router.classify.return_value = QueryIntent.ASSOCIATIVE
 
         # Mock the activation engine methods
-        service.activation_engine.activate = MagicMock(return_value={"a": 1.0, "b": 1.0})
-        service.activation_engine.spread = MagicMock(return_value={"a": 1.0, "b": 0.6, "c": 0.3})
+        service.activation_engine.activate = AsyncMock(return_value={"a": 1.0, "b": 1.0})
+        service.activation_engine.spread = AsyncMock(return_value={"a": 1.0, "b": 0.6, "c": 0.3})
         service.repo.get_subgraph.return_value = _graph_nodes("a", "b", "c")
 
         _res = await service.search(SearchMemoryParams(query="things related to auth"))

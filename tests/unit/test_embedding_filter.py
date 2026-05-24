@@ -37,6 +37,9 @@ def mock_service():
     service.activation_engine = MagicMock()
     service.activation_engine.activate = AsyncMock(return_value={})
     service.activation_engine.spread = AsyncMock(return_value={})
+
+    # Prevent _fire_salience_update from spawning orphan background tasks
+    service._fire_salience_update = MagicMock()
     return service
 
 

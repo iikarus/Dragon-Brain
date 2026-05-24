@@ -90,23 +90,6 @@ with patch("claude_memory.repository.FalkorDB"):
 # ─── Fixtures ───────────────────────────────────────────────────────
 
 
-@pytest.fixture(autouse=True)
-def _drain_orphan_coroutines() -> None:
-    """Force GC after each test to drain orphan coroutines within test boundaries.
-
-    Without this, unawaited coroutines created by AsyncMock's internal
-    _execute_mock_call are reaped at session end, producing warnings.
-    Per-file fixture (branch write guard blocks conftest.py changes).
-    """
-    import gc
-    import warnings
-
-    yield
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        gc.collect()
-
-
 @pytest.fixture()
 def service() -> MemoryService:
     """Creates a MemoryService with all dependencies mocked."""

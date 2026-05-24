@@ -49,8 +49,8 @@ def service():
     svc.query_timeline = AsyncMock(return_value=[])
     svc.traverse_path = AsyncMock(return_value=[])
     svc.search_associative = AsyncMock(return_value=[])
-    svc.activation_engine.activate = MagicMock(return_value={})
-    svc.activation_engine.spread = MagicMock(return_value={})
+    svc.activation_engine.activate = AsyncMock(return_value={})
+    svc.activation_engine.spread = AsyncMock(return_value={})
     return svc
 
 

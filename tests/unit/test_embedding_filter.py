@@ -18,6 +18,23 @@ from claude_memory.schema import (
 from claude_memory.tools import MemoryService
 
 
+@pytest.fixture(autouse=True)
+def _drain_orphan_coroutines() -> None:
+    """Force GC after each test to drain orphan coroutines within test boundaries.
+
+    Without this, unawaited coroutines created by AsyncMock's internal
+    _execute_mock_call are reaped at session end, producing warnings.
+    Per-file fixture (branch write guard blocks conftest.py changes).
+    """
+    import gc
+    import warnings
+
+    yield
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        gc.collect()
+
+
 @pytest.fixture
 def mock_service():
     """Build a MemoryService with all deps mocked."""
@@ -37,7 +54,28 @@ def mock_service():
     service.activation_engine = MagicMock()
     service.activation_engine.activate = AsyncMock(return_value={})
     service.activation_engine.spread = AsyncMock(return_value={})
+    # Prevent _fire_salience_update from creating orphan asyncio.create_task()
+    service._fire_salience_update = MagicMock()
     return service
+
+
+# ─── Topographical Forcing (architect-injected) ─────────────────────
+
+
+def test_meta_fixture_topology_required(mock_service) -> None:
+    """Topographical forcing: fixture must use AsyncMock for async-target attributes.
+
+    Architect-injected per process/issues/14d_BUILD_SPEC.md.
+    DO NOT remove or weaken this test.
+    """
+    from unittest.mock import AsyncMock
+
+    assert isinstance(mock_service.repo, AsyncMock), (
+        "mock_service.repo targets AsyncMemoryRepository (async) — must be AsyncMock"
+    )
+    assert isinstance(mock_service.vector_store, AsyncMock), (
+        "mock_service.vector_store has async methods — must be AsyncMock"
+    )
 
 
 # ─── create_entity: embedding must not leak in receipt ──────────────

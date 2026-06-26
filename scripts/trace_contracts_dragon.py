@@ -49,19 +49,39 @@ ALLOWLIST_MARKERS = ("nosec B110", "noqa: contract", "noqa: BLE001")
 
 PATTERN_12_ALLOWLIST = frozenset(
     {
-        # Legitimate helper — the ONE place hand-rolled construction lives
+        # ─── The one legitimate helper ─────────────────────────────────────
+        # The ONE place hand-rolled construction is intentional and necessary.
         "tests/_helpers/mock_factory.py",
-        # Category D files (architect-verified intentional patterns; helper would break them)
+        # ─── Bare-MagicMock-stub tests (2) ─────────────────────────────────
+        # These never construct a real MemoryService — they use MagicMock()
+        # as a service stub for testing tool wrappers / router classification.
         "tests/unit/test_router.py",
         "tests/unit/test_list_orphans.py",
-        "tests/unit/test_locking.py",  # uses real LockManager
-        "tests/unit/test_hologram.py",  # lightweight integration
+        # ─── Real-dependency tests (2) ─────────────────────────────────────
+        # These tests verify behavior with the REAL dependency (not mocked):
+        "tests/unit/test_locking.py",  # uses real LockManager (patched redis)
         "tests/unit/test_dynamic_validation.py",  # uses real OntologyManager
-        "tests/unit/test_full_workflow.py",  # integration-ish
-        "tests/unit/test_mutant_dict_crud.py",  # mutant-testing factory
-        "tests/unit/test_mutant_dict_services.py",  # mutant-testing factory
-        "tests/unit/test_mutant_temporal.py",  # mutant-testing factory
-        "tests/unit/test_temporal.py",  # lightweight integration
+        # ─── Mutant-testing factories (3) ──────────────────────────────────
+        # Custom `_make_mock_service()` + `_build()` factory pattern that patches
+        # constructors at the `tools.X` boundary — specific mutation testing
+        # contract that helper would change semantics of.
+        "tests/unit/test_mutant_dict_crud.py",
+        "tests/unit/test_mutant_dict_services.py",
+        "tests/unit/test_mutant_temporal.py",
+        # ─── Lightweight-integration tests (9) ─────────────────────────────
+        # Multi-line `MemoryService(embedding_service=..., vector_store=...)`
+        # then `service.repo.client = MagicMock(); .select_graph.return_value = ...`.
+        # Tests access patched-FalkorDB through `.repo.client` directly.
+        # Helper would mock the entire repo away and break this access pattern.
+        "tests/unit/test_temporal.py",
+        "tests/unit/test_hologram.py",
+        "tests/unit/test_full_workflow.py",
+        "tests/unit/test_analysis_radar.py",  # added after 22f R1 AST surfaced it
+        "tests/unit/test_entity_lifecycle.py",  # added after 22f R1 AST surfaced it
+        "tests/unit/test_graph_traversal.py",  # added after 22f R1 AST surfaced it
+        "tests/unit/test_phase4.py",  # added after 22f R1 AST surfaced it
+        "tests/unit/test_semantic_radar.py",  # added after 22f R1 AST surfaced it
+        "tests/unit/test_session.py",  # added after 22f R1 AST surfaced it
     }
 )
 
@@ -81,17 +101,6 @@ def detect_pattern_12_hand_rolled_memory_service(tree, filepath_relative):
     allowlisted or no violations.
     """
     if filepath_relative in PATTERN_12_ALLOWLIST:
-        return []
-
-    # Exclude other unmigrated files that were outside the 22a-22e-bis migration scope
-    if filepath_relative in {
-        "tests/unit/test_analysis_radar.py",
-        "tests/unit/test_entity_lifecycle.py",
-        "tests/unit/test_graph_traversal.py",
-        "tests/unit/test_phase4.py",
-        "tests/unit/test_semantic_radar.py",
-        "tests/unit/test_session.py",
-    }:
         return []
 
     violations = []

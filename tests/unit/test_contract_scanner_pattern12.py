@@ -28,14 +28,14 @@ def test_evil_allowlist_helper_exempt() -> None:
 
 
 def test_evil_allowlist_category_d_exempt() -> None:
-    """All 10 Category D files are allowlisted — none should fire."""
+    """All 16 Category D files are allowlisted — none should fire."""
     source = dedent("""
         from claude_memory.tools import MemoryService
         svc = MemoryService(embedding_service=embedder, vector_store=vs)
     """)
     tree = ast.parse(source)
     category_d_files = [f for f in PATTERN_12_ALLOWLIST if f != "tests/_helpers/mock_factory.py"]
-    assert len(category_d_files) == 10, "Expected 10 Category D files in allowlist"
+    assert len(category_d_files) == 16, "Expected 16 Category D files in allowlist"
     for filepath in category_d_files:
         violations = detect_pattern_12_hand_rolled_memory_service(tree, filepath)
         assert violations == [], f"FAIL: Category D file {filepath} fired Pattern 12"

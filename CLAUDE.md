@@ -53,10 +53,15 @@ After the 14a-22f arc, five layers of physical enforcement guard the test-suite'
 | 1. `branch_write_guard.py` | Pre-commit hook reads `process/issues/N_HARNESS.toml` per-issue denylists | Architect spec edits on builder branches; conftest sneak-arounds; src/ scope creep on test-only PRs |
 | 2. `inject_handoff_hash.py` | Pre-commit hook auto-injects implementation Commit A's hash into handoff doc's `**Commit:** <auto>` placeholder | Hand-edited hashes; stale or fabricated commit references in handoffs |
 | 3. `verify_handoff_completeness.py` | Pre-commit hook validates handoff files for 4-seed baseline, canonical ruff command, no N/A shortcuts on deterministic gates | Single-seed pre-PR baseline drift (22c/22d/22e R1); `--exclude` flag on ruff (22a/22b R1); N/A shortcuts |
-| 4. `trace_contracts_dragon.py` Pattern 12 | AST scanner flags hand-rolled `MemoryService(embedding_service=...)` outside helper + 10 Category D allowlist | Reintroduction of the bug class via new test files or migrations bypassing `make_mock_service()` |
+| 4. `trace_contracts_dragon.py` Pattern 12 | AST scanner flags hand-rolled `MemoryService(embedding_service=...)` outside helper + 16 Category D allowlist | Reintroduction of the bug class via new test files or migrations bypassing `make_mock_service()` |
 | 5. Existing scanner Patterns 1-11 | Baseline 13 (ratcheting toward zero quarterly) | Original audit-remediation contract violations |
 
-The 10 Category D allowlist files (intentional patterns where helper would change semantics): test_router, test_list_orphans, test_locking (real LockManager), test_hologram (lightweight integration), test_dynamic_validation (real OntologyManager), test_full_workflow (integration-ish), test_mutant_dict_crud, test_mutant_dict_services, test_mutant_temporal (mutant-testing factories), test_temporal (lightweight integration).
+The 16 Category D allowlist files (intentional patterns where helper would change semantics), grouped by architectural reason:
+
+- **Bare-MagicMock stubs (2):** test_router, test_list_orphans
+- **Real-dependency tests (2):** test_locking (real LockManager), test_dynamic_validation (real OntologyManager)
+- **Mutant-testing factories (3):** test_mutant_dict_crud, test_mutant_dict_services, test_mutant_temporal
+- **Lightweight-integration (9):** test_temporal, test_hologram, test_full_workflow, test_analysis_radar, test_entity_lifecycle, test_graph_traversal, test_phase4, test_semantic_radar, test_session
 
 Adding a new test file? Use `make_mock_service()` from `tests/_helpers/mock_factory.py`.
 Adding a new file that genuinely needs hand-rolled construction? Add the path to `PATTERN_12_ALLOWLIST` in `scripts/trace_contracts_dragon.py` AND document why in the comment (real-dep usage, mutant testing, integration shape).

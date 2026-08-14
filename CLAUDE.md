@@ -365,6 +365,16 @@ diff_knowledge_state(
 
 Shows what changed in your knowledge graph between two points — added/removed/evolved entities, new/removed relationships, and supersessions. Use for monthly reviews, sprint retrospectives, or "what did I learn last week?" Add `include_observations=True` for per-entity observation diffs (verbose).
 
+## Backups (INFRA-1, 2026-08-14)
+
+`scripts/backup_restore.py` — runs daily via Task Scheduler (`scheduled_backup.py`) and from the dashboard.
+
+- **Format:** `falkor_data.tar.gz` (post-`SAVE` volume tar) + `qdrant_data.snapshot` (Qdrant snapshot API — never a live-file copy) or `qdrant_data.EMPTY` sentinel (legitimately empty collection).
+- **Contract:** any failure → nonzero exit, no silent fallback. `_verify_backup` checks tarfile integrity, not just size. Scheduler's `last_run_status.json` reflects real outcomes.
+- **Restore** (`load <tag>`): dual-format — new `.snapshot` recovers via upload API after readiness wait; legacy `qdrant_data.tar.gz` backups (pre-INFRA-1) restore via volume untar but were never consistency-verified — best effort only.
+- **Round-trip proven:** 2026-08-14 audit recovered a live snapshot into a cold instance with zero point delta.
+- ⚠️ Never run `load` casually — it overwrites the production graph. Arc record: `process/INFRA_1_ARC_CLOSE.md`.
+
 ## Health & Diagnostics
 
 ```

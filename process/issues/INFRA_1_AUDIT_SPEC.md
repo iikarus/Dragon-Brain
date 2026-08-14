@@ -96,7 +96,11 @@ Test evidence: absent collection → sentinel artifact distinguishing "legitimat
 
 ### (g) Restore pre-flight and dual-format (PR-1B)
 
-Test evidence must cover: (i) missing Qdrant artifact → restore refuses BEFORE stopping containers; (ii) legacy `qdrant_data.tar.gz` restores via the unchanged wipe+untar path; (iii) snapshot format recovers via upload API with a readiness wait; (iv) recover failure → nonzero exit, loud error. CLI signatures `save --tag` / `load <tag> --force` unchanged (dashboard `src/dashboard/app.py:246` and the scheduler depend on them).
+**AMENDED 2026-08-14 after your PR-1A discoveries.** Test evidence must cover: (i) missing Qdrant artifact → restore refuses BEFORE stopping containers; (ii) legacy `qdrant_data.tar.gz` restores via the same wipe+untar docker commands, but with return codes examined — a failing subprocess must produce nonzero exit and must NOT print `[OK]` (your `check=False` discovery is now in-contract, not advisory); (iii) snapshot format recovers via upload API with a readiness wait; (iv) recover failure → nonzero exit, loud error. CLI signatures `save --tag` / `load <tag> --force` unchanged (dashboard `src/dashboard/app.py:246` and the scheduler depend on them).
+
+### (g2) Snapshot-leak closure (PR-1B, from your PR-1A discovery)
+
+A download failure occurring AFTER `create_snapshot` succeeded must still attempt server-side `delete_snapshot` before the backup fails. Test evidence must show the cleanup attempt with the created snapshot's name on that path; backup outcome remains loud failure. Code inspection: no path exists where a created snapshot is abandoned without a deletion attempt.
 
 ### (h) Test design discipline
 
@@ -109,7 +113,7 @@ git diff --name-only master..HEAD
 ```
 
 PR-1A: `scripts/backup_restore.py`, `tests/unit/test_backup_save.py`, `process/PR_INFRA_1A_HANDOFF.md`, plus `scripts/scheduled_backup.py` ONLY if (e) required a fix.
-PR-1B: `scripts/backup_restore.py`, `tests/unit/test_backup_load.py`, `process/PR_INFRA_1B_HANDOFF.md`.
+PR-1B: `scripts/backup_restore.py`, `tests/unit/test_backup_load.py`, `tests/unit/test_backup_save.py` (one new evil test for the snapshot-leak closure only — a large diff there is scope creep), `process/PR_INFRA_1B_HANDOFF.md`.
 Anything else — `src/claude_memory/*`, `src/dashboard/*`, conftest, `pyproject.toml` (new deps), `docker-compose.yml`, `Dockerfile`, any `*_SPEC.md` — = **FAIL**.
 
 ### (j) Standard gates
@@ -128,7 +132,7 @@ After per-criterion checks, sweep for adjacent silent-failure patterns in the to
 grep -n "Proceeding anyway\|check=False" scripts/backup_restore.py scripts/scheduled_backup.py
 ```
 
-`check=False` on subprocess calls is acceptable only where the return code is explicitly examined afterward; flag any fire-and-forget remnant as a Discovery (not necessarily FAIL — judgment call, report it).
+`check=False` on subprocess calls is acceptable only where the return code is explicitly examined afterward. On the PR-1B audit this is no longer advisory for `restore()`: fire-and-forget subprocesses there violate criterion (g) and are **FAIL**. Elsewhere in the touched surface, flag remnants as a Discovery (judgment call, report it).
 
 ## Output format
 

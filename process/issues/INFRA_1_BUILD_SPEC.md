@@ -76,10 +76,13 @@ Mock `qdrant_client.QdrantClient`, `httpx`, `redis`, and `subprocess.run`; use `
 
 ## PR-1B — `infra-1/restore-dual-format`
 
+**AMENDED 2026-08-14 after PR-1A audit PASS.** Two changes driven by Codex's non-blocking discoveries: (1) new behavior B7 closes the server-side snapshot leak window in `_snapshot_qdrant` (a download failure between `create_snapshot` and `delete_snapshot` skipped cleanup — spec gap in B1, not a builder defect); (2) the original test row 5 wording "byte-identical to current behavior" contradicted B6's exit-code contract for the legacy restore path and is corrected below — legacy restore runs the SAME docker commands but must now examine their return codes.
+
 ### Files in scope
 
-- **Modify:** `scripts/backup_restore.py` — `restore()` only
+- **Modify:** `scripts/backup_restore.py` — `restore()` + the B7 micro-fix in `_snapshot_qdrant`
 - **New:** `tests/unit/test_backup_load.py`
+- **Modify:** `tests/unit/test_backup_save.py` — one new evil test for B7 only
 - **New:** `process/PR_INFRA_1B_HANDOFF.md`
 
 ### Behavior spec
@@ -93,7 +96,9 @@ Mock `qdrant_client.QdrantClient`, `httpx`, `redis`, and `subprocess.run`; use `
 6. `.EMPTY` format: `up -d`, print note, skip recovery.
 7. Post-restore verification: unless `.EMPTY`, `get_collections()` must list the collection; print its point count. Failure → `[FAIL]`, return False, exit 1 (containers left running — state is visible, not hidden).
 
-**B6 — Exit-code contract:** `load` exits 0 only if every step above succeeded.
+**B6 — Exit-code contract:** `load` exits 0 only if every step above succeeded. This INCLUDES the legacy-format docker subprocesses (falkor untar, qdrant wipe+untar, compose stop/up): same commands as today, but their return codes must be examined — a nonzero `docker run` can no longer be followed by `[OK]`. (`check=False` may remain only where the return code is explicitly inspected afterward.)
+
+**B7 — Snapshot cleanup on download failure** (in `_snapshot_qdrant`, from PR-1A audit discovery): if the download step fails after `create_snapshot` succeeded, attempt `delete_snapshot` before returning False (try/finally or equivalent). Cleanup failure on this path → `[WARN]`, still return False. The backup outcome is unchanged (loud failure); this only prevents leaking server-side snapshots on the Qdrant instance.
 
 ### Test design — `tests/unit/test_backup_load.py`
 
@@ -105,11 +110,13 @@ Same mocking rules as PR-1A.
 | 2 | evil | snapshot upload-recover returns HTTP error | False; exit 1; error printed |
 | 3 | evil | both `.snapshot` and legacy tar present | `.snapshot` path taken; `[WARN]` printed |
 | 4 | sad | Qdrant not ready within timeout after `up -d` | False; loud message naming the container |
-| 5 | neutral | legacy `qdrant_data.tar.gz` backup | legacy wipe+untar path invoked byte-identical to current behavior; True |
+| 5 | neutral | legacy `qdrant_data.tar.gz` backup | legacy wipe+untar path invoked with the same docker commands as current behavior, return codes examined per B6; True |
 | 6 | neutral | `.snapshot` happy path | ordered: stop → falkor untar → up → readiness poll → upload → collection verified; True |
 | 7 | sad | `.EMPTY` backup | Qdrant recovery skipped, note printed, True |
+| 8 | evil | legacy path: qdrant untar subprocess returns nonzero | `restore()` False; exit 1; no `[OK]` printed for the failed step |
+| 9 | evil (B7, in `test_backup_save.py`) | download raises after successful `create_snapshot` | `backup()` False AND `delete_snapshot` was attempted with the created snapshot's name |
 
-≥ 7 tests, all passing under `-W error`.
+≥ 9 tests total across the two files, all passing under `-W error`.
 
 ---
 

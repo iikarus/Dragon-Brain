@@ -3,6 +3,12 @@ import datetime
 import os
 import shutil
 import subprocess
+import sys
+import tarfile
+
+import httpx
+import redis
+from qdrant_client import QdrantClient
 
 # Safety net: ensure UTF-8 mode on Windows where the default codepage may be cp1252
 os.environ.setdefault("PYTHONUTF8", "1")
@@ -10,8 +16,11 @@ os.environ.setdefault("PYTHONUTF8", "1")
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backups")
 
 
-def backup(tag: str | None = None) -> None:
-    """Create a snapshot of FalkorDB and Qdrant data volumes."""
+def backup(tag: str | None = None) -> bool:
+    """Create a snapshot of FalkorDB and Qdrant data volumes.
+
+    Returns True on success, False on any failure.
+    """
     if not tag:
         tag = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -20,14 +29,14 @@ def backup(tag: str | None = None) -> None:
 
     print(f"[SAVE] Creating Save Point: {tag}")
 
-    # 0. Sync to Disk
-    _trigger_persistence()
+    # 0. Sync FalkorDB to Disk (load-bearing per D4/B2)
+    if not _trigger_persistence():
+        print("[FAIL] FalkorDB persistence failed. Aborting backup.")
+        return False
 
     # Check execution environment (Container vs Host)
-    # If we are in the dashboard container, we have direct read-only access to data via /mnt
     falkor_mount = "/mnt/falkor_data"
-    qdrant_mount = "/mnt/qdrant_data"
-    in_container = os.path.exists(falkor_mount) and os.path.exists(qdrant_mount)
+    in_container = os.path.exists(falkor_mount)
 
     # 1. Backup FalkorDB
     print("   Backing up FalkorDB...", end=" ", flush=True)
@@ -40,8 +49,6 @@ def backup(tag: str | None = None) -> None:
         # Docker Run (Host Mode)
         project_name = "claude-memory-mcp"
         falkor_vol = f"{project_name}_falkordb_data"
-
-        # Resolve absolute path for Host volume mount
         host_target_dir = os.path.abspath(target_dir)
 
         cmd_falkor = [
@@ -66,44 +73,16 @@ def backup(tag: str | None = None) -> None:
         print("[OK]")
     else:
         print("[FAIL]")
-        print(res.stderr.decode("utf-8"))
+        if res.stderr:
+            print(res.stderr.decode("utf-8", errors="replace"))
+        return False
 
-    # 2. Backup Qdrant
+    # 2. Backup Qdrant via snapshot API (D1/D2/B1)
     print("   Backing up Qdrant...", end=" ", flush=True)
-    qdrant_archive = os.path.join(target_dir, "qdrant_data.tar.gz")
-
-    if in_container:
-        # Direct Tar
-        cmd_qdrant = ["tar", "czf", qdrant_archive, "-C", qdrant_mount, "."]
-    else:
-        # Docker Run (Host Mode)
-        project_name = "claude-memory-mcp"
-        qdrant_vol = f"{project_name}_qdrant_data"
-        host_target_dir = os.path.abspath(target_dir)
-
-        cmd_qdrant = [
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{qdrant_vol}:/qdrant/storage",
-            "-v",
-            f"{host_target_dir}:/backup",
-            "alpine",
-            "tar",
-            "czf",
-            "/backup/qdrant_data.tar.gz",
-            "-C",
-            "/qdrant/storage",
-            ".",
-        ]
-
-    res = subprocess.run(cmd_qdrant, capture_output=True, check=False)
-    if res.returncode == 0:
-        print("[OK]")
-    else:
+    if not _snapshot_qdrant(target_dir):
         print("[FAIL]")
-        print(res.stderr.decode("utf-8"))
+        return False
+    print("[OK]")
 
     # 3. Backup ontology.json
     ontology_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ontology.json")
@@ -114,43 +93,152 @@ def backup(tag: str | None = None) -> None:
     else:
         print("   [SKIP] ontology.json not found (will use defaults)")
 
+    if not _verify_backup(target_dir):
+        print(f"[FAIL] Backup verification failed for {target_dir}")
+        return False
+
     print(f"[DONE] Save Point Created in {target_dir}")
-    _verify_backup(target_dir)
+    return True
 
 
-def _trigger_persistence() -> None:
-    """Forces databases to flush to disk before backup."""
-    # 1. FalkorDB (Redis)
+def _trigger_persistence() -> bool:
+    """Forces databases to flush to disk before backup.
+
+    Returns True if FalkorDB SAVE succeeded, False otherwise.
+    """
     try:
         host = os.getenv("FALKORDB_HOST", "localhost")
         port = int(os.getenv("FALKORDB_PORT", "6379"))
-        import redis
-
         r = redis.Redis(host=host, port=port)
         r.save()  # Synchronous save
         print("[SAVE] FalkorDB Saved to Disk.")
-    except Exception:
-        print("[WARN] Could not trigger FalkorDB SAVE. Proceeding anyway.")
+        return True
+    except Exception as exc:
+        print(f"[FAIL] Could not trigger FalkorDB SAVE: {exc}")
+        return False
 
 
-def _verify_backup(target_dir: str) -> None:
-    """Checks if backup files are valid (non-empty)."""
-    min_size = 1024 * 10  # 10KB minimum
+def _snapshot_qdrant(target_dir: str) -> bool:
+    """Capture Qdrant collection snapshot via sync QdrantClient and HTTP download.
 
-    for filename in ["falkor_data.tar.gz", "qdrant_data.tar.gz"]:
-        path = os.path.join(target_dir, filename)
-        if not os.path.exists(path):
-            print(f"[FAIL] ERROR: Missing backup file {filename}")
-            continue
+    Per D1/D2/D5/D6 and Behavior B1.
+    """
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", "6333"))
+    collection = os.getenv("QDRANT_COLLECTION", "memory_embeddings")
 
-        size = os.path.getsize(path)
-        if size < min_size:
+    try:
+        client = QdrantClient(host=host, port=port, timeout=120)
+
+        # Fresh-install sad path (D5)
+        if not client.collection_exists(collection_name=collection):
+            empty_sentinel = os.path.join(target_dir, "qdrant_data.EMPTY")
+            with open(empty_sentinel, "wb"):
+                pass
             print(
-                f"[WARN] WARNING: {filename} is suspiciously small"
-                f" ({size} bytes). Backup might be empty."
+                f"\n[NOTE] Collection '{collection}' does not exist. Created qdrant_data.EMPTY sentinel."
             )
-        else:
-            print(f"[OK] Verified {filename} ({size / 1024:.2f} KB)")
+            return True
+
+        snapshot = client.create_snapshot(collection_name=collection, wait=True)
+        if not snapshot or not getattr(snapshot, "name", None):
+            print(f"\n[FAIL] create_snapshot returned invalid description: {snapshot}")
+            return False
+
+        snapshot_name = snapshot.name
+        url = f"http://{host}:{port}/collections/{collection}/snapshots/{snapshot_name}"
+        snapshot_path = os.path.join(target_dir, "qdrant_data.snapshot")
+
+        with httpx.Client(timeout=120.0) as http_client:
+            with http_client.stream("GET", url) as response:
+                response.raise_for_status()
+                with open(snapshot_path, "wb") as f:
+                    for chunk in response.iter_bytes(chunk_size=8192):
+                        f.write(chunk)
+
+    except Exception as exc:
+        print(f"\n[FAIL] Qdrant snapshot capture failed: {exc}")
+        return False
+
+    # Server-side snapshot delete (cleanup hygiene)
+    try:
+        client.delete_snapshot(collection_name=collection, snapshot_name=snapshot_name, wait=True)
+    except Exception as exc:
+        print(f"\n[WARN] Failed to delete server-side snapshot {snapshot_name}: {exc}")
+
+    return True
+
+
+def _verify_falkordb_backup(target_dir: str, min_size: int) -> bool:
+    """Verify falkor_data.tar.gz archive existence and validity."""
+    falkor_path = os.path.join(target_dir, "falkor_data.tar.gz")
+    if not os.path.exists(falkor_path):
+        print("[FAIL] ERROR: Missing backup file falkor_data.tar.gz")
+        return False
+
+    try:
+        with tarfile.open(falkor_path, "r:*") as tar:
+            if len(tar.getmembers()) < 1:
+                print("[FAIL] ERROR: falkor_data.tar.gz contains no files")
+                return False
+    except Exception as exc:
+        print(f"[FAIL] ERROR: falkor_data.tar.gz is corrupted or not a valid tar: {exc}")
+        return False
+
+    falkor_size = os.path.getsize(falkor_path)
+    if falkor_size < min_size:
+        print(
+            f"[WARN] WARNING: falkor_data.tar.gz is suspiciously small"
+            f" ({falkor_size} bytes). Backup might be empty."
+        )
+    else:
+        print(f"[OK] Verified falkor_data.tar.gz ({falkor_size / 1024:.2f} KB)")
+    return True
+
+
+def _verify_qdrant_backup(target_dir: str, min_size: int) -> bool:
+    """Verify Qdrant snapshot archive or empty sentinel existence and validity."""
+    snapshot_path = os.path.join(target_dir, "qdrant_data.snapshot")
+    empty_path = os.path.join(target_dir, "qdrant_data.EMPTY")
+
+    has_snapshot = os.path.exists(snapshot_path)
+    has_empty = os.path.exists(empty_path)
+
+    if (has_snapshot and has_empty) or (not has_snapshot and not has_empty):
+        print("[FAIL] ERROR: Expected exactly one of qdrant_data.snapshot or qdrant_data.EMPTY")
+        return False
+
+    if has_empty:
+        print("[OK] Verified qdrant_data.EMPTY (empty collection sentinel)")
+        return True
+
+    snapshot_size = os.path.getsize(snapshot_path)
+    if snapshot_size < min_size:
+        print(
+            f"[FAIL] ERROR: qdrant_data.snapshot is too small"
+            f" ({snapshot_size} bytes, minimum {min_size} bytes)"
+        )
+        return False
+
+    try:
+        with tarfile.open(snapshot_path, "r:*") as tar:
+            if len(tar.getmembers()) < 1:
+                print("[FAIL] ERROR: qdrant_data.snapshot contains no files")
+                return False
+    except Exception as exc:
+        print(f"[FAIL] ERROR: qdrant_data.snapshot is corrupted or not a valid tar: {exc}")
+        return False
+
+    print(f"[OK] Verified qdrant_data.snapshot ({snapshot_size / 1024:.2f} KB)")
+    return True
+
+
+def _verify_backup(target_dir: str) -> bool:
+    """Checks if backup files are valid (Behavior B3)."""
+    min_size = 1024 * 10  # 10KB minimum
+    if not _verify_falkordb_backup(target_dir, min_size):
+        return False
+    return _verify_qdrant_backup(target_dir, min_size)
 
 
 def restore(tag: str, force: bool = False) -> None:
@@ -240,8 +328,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.command == "save":
-        backup(args.tag)
+        success = backup(args.tag)
+        sys.exit(0 if success else 1)
     elif args.command == "load":
         restore(args.tag, args.force)
     else:
         parser.print_help()
+        sys.exit(1)

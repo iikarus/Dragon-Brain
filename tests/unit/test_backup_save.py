@@ -387,3 +387,46 @@ def test_neutral_verify_backup_well_formed(tmp_path: Path) -> None:
     empty_file.write_bytes(b"")
 
     assert backup_restore._verify_backup(str(tmp_path)) is True
+
+
+# ─── Row 9: Evil (B7) — download raises after successful create_snapshot ──
+
+
+def test_evil_download_fails_cleans_up_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Row 9: download raises after successful create_snapshot -> backup() False AND delete_snapshot attempted."""
+    monkeypatch.setattr(backup_restore, "BACKUP_DIR", str(tmp_path))
+
+    tag = "test_evil_download_leak_prevention"
+    target_dir = str(tmp_path / tag)
+
+    mock_redis_cls = MagicMock()
+    mock_qdrant_cls = MagicMock()
+    mock_qdrant_inst = MagicMock()
+    mock_qdrant_cls.return_value = mock_qdrant_inst
+    mock_qdrant_inst.collection_exists.return_value = True
+
+    snapshot_desc = MagicMock()
+    snapshot_desc.name = "snap_leaked_123.snapshot"
+    mock_qdrant_inst.create_snapshot.return_value = snapshot_desc
+    mock_qdrant_inst.delete_snapshot.return_value = True
+
+    # Mock httpx to fail mid-download
+    mock_http_client_cls = _mock_httpx_client(b"", status_code=500)
+
+    with (
+        patch("backup_restore.redis.Redis", mock_redis_cls),
+        patch("backup_restore.QdrantClient", mock_qdrant_cls),
+        patch("backup_restore.httpx.Client", mock_http_client_cls),
+        patch("backup_restore.subprocess.run", side_effect=_mock_falkor_run_success(target_dir)),
+    ):
+        result = backup_restore.backup(tag=tag)
+        assert result is False
+
+        # Assert delete_snapshot was attempted with the created snapshot name
+        mock_qdrant_inst.delete_snapshot.assert_called_once_with(
+            collection_name="memory_embeddings",
+            snapshot_name="snap_leaked_123.snapshot",
+            wait=True,
+        )

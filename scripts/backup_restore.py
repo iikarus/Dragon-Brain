@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 
 import httpx
 import redis
@@ -77,7 +78,7 @@ def backup(tag: str | None = None) -> bool:
             print(res.stderr.decode("utf-8", errors="replace"))
         return False
 
-    # 2. Backup Qdrant via snapshot API (D1/D2/B1)
+    # 2. Backup Qdrant via snapshot API (D1/D2/B1/B7)
     print("   Backing up Qdrant...", end=" ", flush=True)
     if not _snapshot_qdrant(target_dir):
         print("[FAIL]")
@@ -121,11 +122,14 @@ def _trigger_persistence() -> bool:
 def _snapshot_qdrant(target_dir: str) -> bool:
     """Capture Qdrant collection snapshot via sync QdrantClient and HTTP download.
 
-    Per D1/D2/D5/D6 and Behavior B1.
+    Per D1/D2/D5/D6 and Behaviors B1/B7.
     """
     host = os.getenv("QDRANT_HOST", "localhost")
     port = int(os.getenv("QDRANT_PORT", "6333"))
     collection = os.getenv("QDRANT_COLLECTION", "memory_embeddings")
+
+    client: QdrantClient | None = None
+    snapshot_name: str | None = None
 
     try:
         client = QdrantClient(host=host, port=port, timeout=120)
@@ -158,6 +162,15 @@ def _snapshot_qdrant(target_dir: str) -> bool:
 
     except Exception as exc:
         print(f"\n[FAIL] Qdrant snapshot capture failed: {exc}")
+        if client is not None and snapshot_name is not None:
+            try:
+                client.delete_snapshot(
+                    collection_name=collection,
+                    snapshot_name=snapshot_name,
+                    wait=True,
+                )
+            except Exception as del_exc:
+                print(f"[WARN] Failed to delete server-side snapshot {snapshot_name}: {del_exc}")
         return False
 
     # Server-side snapshot delete (cleanup hygiene)
@@ -241,37 +254,49 @@ def _verify_backup(target_dir: str) -> bool:
     return _verify_qdrant_backup(target_dir, min_size)
 
 
-def restore(tag: str, force: bool = False) -> None:
-    """Restore a previously saved snapshot, overwriting current database state."""
-    target_dir = os.path.join(BACKUP_DIR, tag)
-    if not os.path.exists(target_dir):
-        print(f"[FAIL] Backup '{tag}' not found in {BACKUP_DIR}")
-        return
+def _validate_restore_artifacts(target_dir: str) -> tuple[bool, str | None]:
+    """Validate backup directory artifacts before touching running containers.
 
-    print(f"[RESTORE] Restoring Save Point: {tag}")
-    print("[WARN] WARNING: This will overwrite current database state.")
+    Returns (is_valid, qdrant_mode) where qdrant_mode in {'snapshot', 'empty', 'legacy'}.
+    """
+    falkor_path = os.path.join(target_dir, "falkor_data.tar.gz")
+    if not os.path.exists(falkor_path):
+        print(f"[FAIL] Missing falkor_data.tar.gz in {target_dir}")
+        return False, None
 
-    if not force:
-        confirm = input("Type 'RESTORE' to confirm: ")
-        if confirm != "RESTORE":
-            print("Aborted.")
-            return
-    else:
-        print("Force mode enabled. Proceeding immediately.")
+    snapshot_path = os.path.join(target_dir, "qdrant_data.snapshot")
+    empty_path = os.path.join(target_dir, "qdrant_data.EMPTY")
+    legacy_path = os.path.join(target_dir, "qdrant_data.tar.gz")
 
-    # Stop containers first to avoid corruption
-    print("Stopping containers...")
-    subprocess.run(
-        ["docker-compose", "stop"],  # noqa: S607
-        check=False,
-    )
+    has_snapshot = os.path.exists(snapshot_path)
+    has_empty = os.path.exists(empty_path)
+    has_legacy = os.path.exists(legacy_path)
 
-    # Restore FalkorDB
-    project_name = "claude-memory-mcp"
-    falkor_vol = f"{project_name}_falkordb_data"
-    qdrant_vol = f"{project_name}_qdrant_data"
+    if not has_snapshot and not has_empty and not has_legacy:
+        print(
+            "[FAIL] No Qdrant backup artifact found (expected qdrant_data.snapshot, qdrant_data.EMPTY, or qdrant_data.tar.gz)"
+        )
+        return False, None
 
-    print("Restoring FalkorDB...", end=" ")
+    if has_snapshot and has_empty:
+        print("[FAIL] Invalid backup: both qdrant_data.snapshot and qdrant_data.EMPTY exist")
+        return False, None
+
+    if (has_snapshot or has_empty) and has_legacy:
+        print(
+            "[WARN] Both snapshot and legacy qdrant_data.tar.gz present. Preferring snapshot format."
+        )
+
+    if has_snapshot:
+        return True, "snapshot"
+    if has_empty:
+        return True, "empty"
+    return True, "legacy"
+
+
+def _restore_falkordb_volume(target_dir: str, falkor_vol: str) -> bool:
+    """Restore FalkorDB volume from falkor_data.tar.gz."""
+    print("Restoring FalkorDB...", end=" ", flush=True)
     cmd_falkor = [
         "docker",
         "run",
@@ -285,11 +310,19 @@ def restore(tag: str, force: bool = False) -> None:
         "-c",
         "rm -rf /data/* && tar xzf /backup/falkor_data.tar.gz -C /data",
     ]
-    subprocess.run(cmd_falkor, check=False)
+    res_falkor = subprocess.run(cmd_falkor, capture_output=True, check=False)
+    if res_falkor.returncode != 0:
+        print("[FAIL]")
+        if res_falkor.stderr:
+            print(res_falkor.stderr.decode("utf-8", errors="replace"))
+        return False
     print("[OK]")
+    return True
 
-    # Restore Qdrant
-    print("Restoring Qdrant...", end=" ")
+
+def _restore_qdrant_legacy(target_dir: str, qdrant_vol: str) -> bool:
+    """Restore legacy qdrant_data.tar.gz format."""
+    print("Restoring Qdrant...", end=" ", flush=True)
     cmd_qdrant = [
         "docker",
         "run",
@@ -303,15 +336,189 @@ def restore(tag: str, force: bool = False) -> None:
         "-c",
         "rm -rf /qdrant/storage/* && tar xzf /backup/qdrant_data.tar.gz -C /qdrant/storage",
     ]
-    subprocess.run(cmd_qdrant, check=False)
+    res_qdrant = subprocess.run(cmd_qdrant, capture_output=True, check=False)
+    if res_qdrant.returncode != 0:
+        print("[FAIL]")
+        if res_qdrant.stderr:
+            print(res_qdrant.stderr.decode("utf-8", errors="replace"))
+        return False
     print("[OK]")
+    return True
 
-    print("Restarting containers...")
-    subprocess.run(
-        ["docker-compose", "up", "-d"],  # noqa: S607
+
+def _wait_for_qdrant(host: str, port: int, timeout: float = 60.0) -> bool:
+    """Polls Qdrant readiness until 200 OK or timeout expires."""
+    deadline = time.time() + timeout
+    url = f"http://{host}:{port}/readyz"
+    with httpx.Client(timeout=2.0) as client:
+        while time.time() < deadline:
+            try:
+                resp = client.get(url)
+                if resp.status_code == 200:
+                    return True
+            except Exception:  # noqa: S110
+                pass
+            time.sleep(0.5)
+    return False
+
+
+def _recover_qdrant_snapshot(target_dir: str, host: str, port: int, collection: str) -> bool:
+    """Upload and recover snapshot via Qdrant HTTP API."""
+    snapshot_path = os.path.join(target_dir, "qdrant_data.snapshot")
+    upload_url = f"http://{host}:{port}/collections/{collection}/snapshots/upload?priority=snapshot"
+    try:
+        with open(snapshot_path, "rb") as f:
+            files = {"snapshot": (os.path.basename(snapshot_path), f, "application/octet-stream")}
+            with httpx.Client(timeout=120.0) as http_client:
+                response = http_client.post(upload_url, files=files)
+                response.raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"\n[FAIL] Qdrant snapshot upload-recovery failed: {exc}")
+        return False
+
+
+def _verify_qdrant_restored(host: str, port: int, collection: str) -> bool:
+    """Verify collection exists and print point count."""
+    try:
+        client = QdrantClient(host=host, port=port, timeout=120)
+        collections_resp = client.get_collections()
+        colls = [c.name for c in collections_resp.collections]
+        if collection not in colls:
+            print(
+                f"\n[FAIL] Post-restore verification failed: collection '{collection}' not found."
+            )
+            return False
+        count_info = client.count(collection_name=collection)
+        points_count = getattr(count_info, "count", count_info)
+        print(f"[OK] Post-restore verified: collection '{collection}' has {points_count} points.")
+        return True
+    except Exception as exc:
+        print(f"\n[FAIL] Post-restore verification failed: {exc}")
+        return False
+
+
+def _stop_containers() -> bool:
+    """Stop running compose containers."""
+    print("Stopping containers...")
+    res_stop = subprocess.run(
+        ["docker-compose", "stop"],  # noqa: S607
+        capture_output=True,
         check=False,
     )
+    if res_stop.returncode != 0:
+        print(
+            f"[FAIL] docker-compose stop failed: {res_stop.stderr.decode('utf-8', errors='replace')}"
+        )
+        return False
+    return True
+
+
+def _start_containers() -> bool:
+    """Restart compose containers."""
+    print("Restarting containers...")
+    res_up = subprocess.run(
+        ["docker-compose", "up", "-d"],  # noqa: S607
+        capture_output=True,
+        check=False,
+    )
+    if res_up.returncode != 0:
+        print(
+            f"[FAIL] docker-compose up -d failed: {res_up.stderr.decode('utf-8', errors='replace')}"
+        )
+        return False
+    return True
+
+
+def _restore_snapshot_pipeline(target_dir: str, host: str, port: int, collection: str) -> bool:
+    """Run Qdrant snapshot recovery pipeline after container restart."""
+    print("Waiting for Qdrant readiness...", end=" ", flush=True)
+    if not _wait_for_qdrant(host, port, timeout=60.0):
+        print(f"\n[FAIL] Qdrant container on {host}:{port} was not ready within 60s timeout.")
+        return False
+    print("[OK]")
+
+    print("Recovering Qdrant snapshot...", end=" ", flush=True)
+    if not _recover_qdrant_snapshot(target_dir, host, port, collection):
+        return False
+    print("[OK]")
+
+    return _verify_qdrant_restored(host, port, collection)
+
+
+def _confirm_restore(tag: str, force: bool) -> bool:
+    """Prompt user confirmation or proceed in force mode."""
+    print(f"[RESTORE] Restoring Save Point: {tag}")
+    print("[WARN] WARNING: This will overwrite current database state.")
+    if not force:
+        confirm = input("Type 'RESTORE' to confirm: ")
+        if confirm != "RESTORE":
+            print("Aborted.")
+            return False
+    else:
+        print("Force mode enabled. Proceeding immediately.")
+    return True
+
+
+def _dispatch_qdrant_restore(qdrant_mode: str, target_dir: str, qdrant_vol: str) -> bool:
+    """Execute Qdrant restoration steps based on detected backup format."""
+    if qdrant_mode == "legacy":
+        if not _restore_qdrant_legacy(target_dir, qdrant_vol):
+            return False
+        return _start_containers()
+
+    if not _start_containers():
+        return False
+
+    if qdrant_mode == "empty":
+        print("[NOTE] Empty collection sentinel detected. Skipping Qdrant recovery.")
+        return True
+
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", "6333"))
+    collection = os.getenv("QDRANT_COLLECTION", "memory_embeddings")
+    return _restore_snapshot_pipeline(target_dir, host, port, collection)
+
+
+def _prepare_restore(tag: str) -> tuple[bool, str, str | None]:
+    """Check existence of backup directory and validate artifacts."""
+    target_dir = os.path.join(BACKUP_DIR, tag)
+    if not os.path.exists(target_dir):
+        print(f"[FAIL] Backup '{tag}' not found in {BACKUP_DIR}")
+        return False, target_dir, None
+    valid, qdrant_mode = _validate_restore_artifacts(target_dir)
+    return valid, target_dir, qdrant_mode
+
+
+def restore(tag: str, force: bool = False) -> bool:
+    """Restore a previously saved snapshot, overwriting current database state.
+
+    Per D3/D4/D5/D6 and Behaviors B5/B6.
+    """
+    valid, target_dir, qdrant_mode = _prepare_restore(tag)
+    if not valid or qdrant_mode is None:
+        return False
+
+    if not _confirm_restore(tag, force):
+        return False
+
+    # Stop containers first to avoid corruption
+    if not _stop_containers():
+        return False
+
+    project_name = "claude-memory-mcp"
+    falkor_vol = f"{project_name}_falkordb_data"
+    qdrant_vol = f"{project_name}_qdrant_data"
+
+    # Restore FalkorDB volume
+    if not _restore_falkordb_volume(target_dir, falkor_vol):
+        return False
+
+    if not _dispatch_qdrant_restore(qdrant_mode, target_dir, qdrant_vol):
+        return False
+
     print("[DONE] System Restored.")
+    return True
 
 
 if __name__ == "__main__":
@@ -331,7 +538,8 @@ if __name__ == "__main__":
         success = backup(args.tag)
         sys.exit(0 if success else 1)
     elif args.command == "load":
-        restore(args.tag, args.force)
+        success = restore(args.tag, args.force)
+        sys.exit(0 if success else 1)
     else:
         parser.print_help()
         sys.exit(1)

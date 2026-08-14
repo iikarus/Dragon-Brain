@@ -1,0 +1,29 @@
+# Per-issue write-guard config for the infra-1/* branch family
+# Read by scripts/hooks/branch_write_guard.py
+#
+# INFRA-1 is a scripts-only production fix: replace the live-file Qdrant
+# backup with snapshot-API capture, harden verification, and make backup/
+# restore exit codes truthful. Per process/issues/INFRA_1_BUILD_SPEC.md.
+
+[infra-1]
+denied_paths = [
+    # Production source and dashboard are out of scope — this is a scripts arc.
+    "src/claude_memory",
+    "src/dashboard",
+    # No new dependencies, no infra redefinition.
+    "pyproject.toml",
+    "docker-compose.yml",
+    "Dockerfile",
+    # No conftest sneak-arounds; new tests must be self-contained.
+    "tests/unit/conftest.py",
+    "tests/conftest.py",
+    "tests/integration/conftest.py",
+    "pytest.ini",
+    # Architect-protected specs — Builder must not modify audit criteria.
+    "process/issues/INFRA_1_BUILD_SPEC.md",
+    "process/issues/INFRA_1_AUDIT_SPEC.md",
+    "process/issues/INFRA_1_HARNESS.toml",
+    "process/REMEDIATION_BUILD_SPEC.md",
+    "process/REMEDIATION_AUDIT_SPEC.md",
+]
+rationale = "INFRA-1 touches scripts/backup_restore.py, scripts/scheduled_backup.py (conditionally), and two new self-contained test files ONLY. Modifying src/ is scope creep; adding dependencies or compose changes violates locked decision D6; spec files are the auditor's source of truth and a structural conflict of interest for the Builder. Spec errors surfacing during execution are escalated to the Architect, who updates specs on master; AG rebases to pick them up."

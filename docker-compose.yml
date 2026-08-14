@@ -31,7 +31,10 @@ services:
       start_period: 10s
 
   dashboard:
-    build: .
+    # Same image as the embeddings service (identical Dockerfile; compose
+    # `command:` differentiates the services). A second image name doubled
+    # ~20GB of blob storage for byte-identical content.
+    image: claude-memory-mcp-embeddings:latest
     ports:
       - "127.0.0.1:8501:8501"
     environment:

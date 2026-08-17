@@ -52,7 +52,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check src tests benchmarks
+        run: ruff check src tests scripts benchmarks
 
       - name: Unit tests
         run: pytest tests/unit/ -m "not slow" -v --tb=short

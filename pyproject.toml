@@ -47,7 +47,11 @@ dev = [
     # 1. Automation
     "pre-commit>=3.6.0",
     # 2. Linting/Formatting
-    "ruff>=0.1.0",
+    # Pinned exactly: lint is a CI gate, and unpinned ruff means the gate's
+    # rules change whenever astral-sh releases (0.16 stabilized PLR0917 and
+    # broke a six-weeks-green master). Bump deliberately at quarterly review,
+    # matching .pre-commit-config.yaml's rev.
+    "ruff==0.15.0",
     # 3. Testing
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

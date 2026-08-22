@@ -42,6 +42,8 @@ If you hit `MEMORY_LAYER_DEGRADED`, the memory layer is broken — don't assume 
 
 `tox -e contracts` runs `scripts/trace_contracts_dragon.py`. **Baseline = 13** (down from 64 at audit start). Quarterly baseline reduction reviews ratchet toward zero.
 
+**Lint gate is pinned and unified (2026-08-17):** ruff is `==0.15.0` in pyproject dev extras AND `.pre-commit-config.yaml` — never a floating `>=`. GitHub CI and local both lint the union `src tests scripts benchmarks`. Rationale: unpinned ruff floated to 0.16.3 in CI and broke six-weeks-green master with newly-stabilized PLR0917 (7 hits, known debt for the next deliberate bump — bump pin + pre-commit rev together at quarterly review). Full incident: operator's Code Literacy Layer 3.5.22 "Hermetic Gates". Same incident killed the last non-hermetic test file — new tests must pass in a fresh clone: mock every port (localhost:6333 is PRODUCTION Qdrant on the operator's machine), assume no pre-existing dirs.
+
 **If your commit produces NEW violations, the build fails before merge.** This is the regression guardrail; respect it.
 
 ### Test-suite physical enforcement (post-22 lockdown)
